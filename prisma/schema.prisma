@@ -1,0 +1,125 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum CardStatus {
+  unused
+  learning
+  review
+  correct
+  incorrect
+}
+
+enum ReviewResult {
+  correct
+  wrong
+  omitted
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String?  @unique
+  passwordHash String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model Deck {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  lessonDate  DateTime?
+  cards       Card[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Card {
+  id             String      @id @default(cuid())
+  front          String
+  back           String      @db.Text
+  deckId         String
+  deck           Deck        @relation(fields: [deckId], references: [id], onDelete: Cascade)
+  status         CardStatus  @default(unused)
+  isMarked       Boolean     @default(false)
+  isOmitted      Boolean     @default(false)
+  correctCount   Int         @default(0)
+  incorrectCount Int         @default(0)
+  reviewCount    Int         @default(0)
+  lastReviewedAt DateTime?
+  nextReviewAt   DateTime?
+  intervalDays   Int         @default(0)
+  easeFactor     Float       @default(2.5)
+  tags           CardTag[]
+  reviewLogs     ReviewLog[]
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  @@unique([deckId, front, back])
+  @@index([deckId])
+  @@index([status])
+  @@index([nextReviewAt])
+}
+
+model Tag {
+  id        String    @id @default(cuid())
+  name      String    @unique
+  cards     CardTag[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+}
+
+model CardTag {
+  cardId String
+  tagId  String
+  card   Card   @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  tag    Tag    @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([cardId, tagId])
+}
+
+model StudySession {
+  id            String      @id @default(cuid())
+  mode          String
+  deckIds       String[]
+  filters       Json
+  cardIds       String[]    @default([])
+  cardCount     Int
+  correctCount  Int         @default(0)
+  wrongCount    Int         @default(0)
+  omittedCount  Int         @default(0)
+  startedAt     DateTime    @default(now())
+  completedAt   DateTime?
+  reviewLogs    ReviewLog[]
+}
+
+model ReviewLog {
+  id                     String       @id @default(cuid())
+  cardId                 String
+  card                   Card         @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  sessionId              String?
+  session                StudySession? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+  result                 ReviewResult
+  reviewedAt             DateTime     @default(now())
+  previousIntervalDays   Int
+  newIntervalDays        Int
+  previousEaseFactor     Float
+  newEaseFactor          Float
+  previousStatus         CardStatus
+  previousIsOmitted      Boolean
+  previousCorrectCount   Int
+  previousIncorrectCount Int
+  previousReviewCount    Int
+  previousNextReviewAt   DateTime?
+  previousLastReviewedAt DateTime?
+  createdAt              DateTime     @default(now())
+  updatedAt              DateTime     @updatedAt
+
+  @@index([cardId])
+  @@index([sessionId])
+  @@index([reviewedAt])
+}
