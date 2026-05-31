@@ -143,6 +143,14 @@ export function StudySessionPlayer({
         event.preventDefault();
         setRevealed((value) => !value);
       }
+      if (event.key === "ArrowUp") {
+        event.preventDefault();
+        setRevealed(true);
+      }
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        setRevealed(false);
+      }
       if (event.key === "1") void answer("wrong");
       if (event.key === "2") void answer("correct");
       if (event.key.toLowerCase() === "m") void patchFlag({ isMarked: !card.isMarked });
