@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, Download, EyeOff, Pencil, RotateCcw, Search, Star, Trash2, Upload, X } from "lucide-react";
 import { formatDate, isDueToday, isOverdue } from "@/lib/dates";
 import { stripMarkdownLite } from "@/lib/markdown-table";
@@ -55,6 +55,9 @@ export function CardBank({ initialCards, decks, tags }: { initialCards: BankCard
   const [filters, setFilters] = useState<Record<string, boolean>>({});
   const [editing, setEditing] = useState<BankCard | null>(null);
   const [message, setMessage] = useState("");
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  const [isDeletingSelected, setIsDeletingSelected] = useState(false);
+  const selectVisibleRef = useRef<HTMLInputElement>(null);
 
   const filteredCards = useMemo(() => {
     const enabled = Object.entries(filters)
@@ -73,6 +76,14 @@ export function CardBank({ initialCards, decks, tags }: { initialCards: BankCard
       return true;
     });
   }, [cards, deckId, filters, query, tag]);
+
+  const visibleSelectedCount = useMemo(() => filteredCards.filter((card) => selectedIds.has(card.id)).length, [filteredCards, selectedIds]);
+  const allVisibleSelected = filteredCards.length > 0 && visibleSelectedCount === filteredCards.length;
+
+  useEffect(() => {
+    if (!selectVisibleRef.current) return;
+    selectVisibleRef.current.indeterminate = visibleSelectedCount > 0 && visibleSelectedCount < filteredCards.length;
+  }, [filteredCards.length, visibleSelectedCount]);
 
   async function patchCard(id: string, patch: Record<string, unknown>) {
     const response = await fetch(`/api/cards/${id}`, {
@@ -100,6 +111,63 @@ export function CardBank({ initialCards, decks, tags }: { initialCards: BankCard
     const response = await fetch(`/api/cards/${id}`, { method: "DELETE" });
     if (!response.ok) return;
     setCards((current) => current.filter((card) => card.id !== id));
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      next.delete(id);
+      return next;
+    });
+  }
+
+  function toggleCardSelection(id: string, checked: boolean) {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      if (checked) {
+        next.add(id);
+      } else {
+        next.delete(id);
+      }
+      return next;
+    });
+  }
+
+  function toggleVisibleSelection(checked: boolean) {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      filteredCards.forEach((card) => {
+        if (checked) {
+          next.add(card.id);
+        } else {
+          next.delete(card.id);
+        }
+      });
+      return next;
+    });
+  }
+
+  async function deleteSelectedCards() {
+    const ids = Array.from(selectedIds);
+    const idsToDelete = new Set(ids);
+    if (ids.length === 0) return;
+    if (!window.confirm(`Delete ${ids.length} selected card${ids.length === 1 ? "" : "s"} permanently?`)) return;
+
+    setMessage("");
+    setIsDeletingSelected(true);
+    try {
+      const response = await fetch("/api/cards", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids }),
+      });
+      const body = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(body?.error ?? "Could not delete selected cards.");
+      setCards((current) => current.filter((card) => !idsToDelete.has(card.id)));
+      setSelectedIds(new Set());
+      setMessage(`Deleted ${body?.deletedCount ?? ids.length} selected card${ids.length === 1 ? "" : "s"}.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not delete selected cards.");
+    } finally {
+      setIsDeletingSelected(false);
+    }
   }
 
   async function saveEdit(event: React.FormEvent<HTMLFormElement>) {
@@ -163,13 +231,41 @@ export function CardBank({ initialCards, decks, tags }: { initialCards: BankCard
       {message ? <p className="mt-4 rounded-2xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">{message}</p> : null}
 
       <div className="mt-5 overflow-hidden rounded-2xl border border-slate-200 bg-white">
-        <div className="border-b border-slate-200 px-4 py-3 text-sm font-semibold text-slate-600">
-          Showing {filteredCards.length} of {cards.length}
+        <div className="flex flex-col gap-3 border-b border-slate-200 px-4 py-3 text-sm font-semibold text-slate-600 sm:flex-row sm:items-center sm:justify-between">
+          <span>
+            Showing {filteredCards.length} of {cards.length}
+            {selectedIds.size > 0 ? <span className="ml-2 text-blue-600">{selectedIds.size} selected</span> : null}
+          </span>
+          {selectedIds.size > 0 ? (
+            <div className="flex flex-wrap gap-2">
+              <button type="button" className="btn min-h-9 px-3" onClick={() => toggleVisibleSelection(true)}>
+                Select shown
+              </button>
+              <button type="button" className="btn min-h-9 px-3" onClick={() => setSelectedIds(new Set())}>
+                Clear
+              </button>
+              <button type="button" className="btn btn-red min-h-9 px-3" onClick={deleteSelectedCards} disabled={isDeletingSelected}>
+                <Trash2 size={15} />
+                {isDeletingSelected ? "Deleting..." : "Delete selected"}
+              </button>
+            </div>
+          ) : null}
         </div>
         <div className="overflow-auto">
-          <table className="w-full min-w-[1160px] text-left text-sm">
+          <table className="w-full min-w-[1220px] text-left text-sm">
             <thead className="bg-slate-50 text-xs uppercase text-slate-500">
               <tr>
+                <th className="w-12 px-4 py-3">
+                  <input
+                    ref={selectVisibleRef}
+                    type="checkbox"
+                    className="h-4 w-4"
+                    checked={allVisibleSelected}
+                    disabled={filteredCards.length === 0}
+                    onChange={(event) => toggleVisibleSelection(event.target.checked)}
+                    aria-label="Select all shown cards"
+                  />
+                </th>
                 <th className="px-4 py-3">Front</th>
                 <th className="px-4 py-3">Deck</th>
                 <th className="px-4 py-3">Tags</th>
@@ -182,7 +278,16 @@ export function CardBank({ initialCards, decks, tags }: { initialCards: BankCard
             </thead>
             <tbody className="divide-y divide-slate-100">
               {filteredCards.map((card) => (
-                <tr key={card.id} className="align-top">
+                <tr key={card.id} className={selectedIds.has(card.id) ? "align-top bg-blue-50/45" : "align-top"}>
+                  <td className="px-4 py-3">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4"
+                      checked={selectedIds.has(card.id)}
+                      onChange={(event) => toggleCardSelection(card.id, event.target.checked)}
+                      aria-label={`Select ${stripMarkdownLite(card.front)}`}
+                    />
+                  </td>
                   <td className="max-w-sm px-4 py-3">
                     <p className="font-semibold">{stripMarkdownLite(card.front)}</p>
                     <p className="mt-1 line-clamp-2 text-slate-500">{stripMarkdownLite(card.back)}</p>
