@@ -61,6 +61,7 @@ export default async function StudySessionPage({ params }: { params: Promise<{ i
         correctCount: session.correctCount,
         wrongCount: session.wrongCount,
         omittedCount: session.omittedCount,
+        completedAt: session.completedAt?.toISOString() ?? null,
       }}
       initialCards={orderedCards}
       initialAnswers={Object.fromEntries(session.reviewLogs.map((log) => [log.cardId, log.result]))}

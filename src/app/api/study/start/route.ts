@@ -9,12 +9,14 @@ function matchesStatus(card: {
   status: CardStatus;
   isMarked: boolean;
   isOmitted: boolean;
+  incorrectCount: number;
   nextReviewAt: Date | null;
 }, key: string) {
   const todayStart = startOfToday();
   const todayEnd = endOfToday();
   if (key === "unused") return card.status === CardStatus.unused;
   if (key === "incorrect") return card.status === CardStatus.incorrect;
+  if (key === "difficult") return card.incorrectCount > 0;
   if (key === "marked") return card.isMarked;
   if (key === "omitted") return card.isOmitted;
   if (key === "correct") return card.status === CardStatus.review || card.status === CardStatus.correct;
@@ -49,13 +51,16 @@ export async function POST(request: Request) {
   const includeOmitted = Boolean(body?.includeOmitted) || Boolean(filters.omitted);
   const includeCorrect = Boolean(body?.includeCorrect);
   const shouldShuffle = body?.shuffle !== false;
+  const prioritizesDifficulty = filterKeys.includes("difficult");
 
   const prisma = getPrisma();
   const cards = await prisma.card.findMany({
     where: {
       ...(deckIds.length > 0 ? { deckId: { in: deckIds } } : {}),
     },
-    orderBy: [{ nextReviewAt: "asc" }, { createdAt: "asc" }],
+    orderBy: prioritizesDifficulty
+      ? [{ incorrectCount: "desc" }, { reviewCount: "desc" }, { nextReviewAt: "asc" }, { createdAt: "asc" }]
+      : [{ nextReviewAt: "asc" }, { createdAt: "asc" }],
   });
 
   const selected = cards.filter((card) => {
@@ -72,7 +77,8 @@ export async function POST(request: Request) {
     return true;
   });
 
-  const finalCards = (shouldShuffle ? shuffleCards(selected) : selected).slice(0, limit);
+  const limitedCards = prioritizesDifficulty ? selected.slice(0, limit) : selected;
+  const finalCards = (shouldShuffle ? shuffleCards(limitedCards) : limitedCards).slice(0, limit);
 
   if (finalCards.length === 0) {
     return NextResponse.json({ error: "No cards match this selection." }, { status: 400 });

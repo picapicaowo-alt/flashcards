@@ -1,10 +1,21 @@
 "use client";
 
+import Link from "next/link";
 import { useMemo, useState } from "react";
-import { ArrowRight, CheckCircle2, Info, Shuffle } from "lucide-react";
-import { isDueToday, isOverdue } from "@/lib/dates";
+import { ArrowRight, CheckCircle2, Info, PlayCircle, Shuffle, X } from "lucide-react";
+import { formatDate, isDueToday, isOverdue } from "@/lib/dates";
 
 type DeckSummary = { id: string; name: string; total: number };
+type ActiveStudySession = {
+  id: string;
+  mode: string;
+  cardCount: number;
+  answeredCount: number;
+  correctCount: number;
+  wrongCount: number;
+  omittedCount: number;
+  startedAt: string;
+};
 type StudyCardSummary = {
   id: string;
   deckId: string;
@@ -20,6 +31,7 @@ type StudyCardSummary = {
 const statusOptions = [
   { key: "unused", label: "Unused" },
   { key: "incorrect", label: "Incorrect" },
+  { key: "difficult", label: "Most difficult" },
   { key: "marked", label: "Marked" },
   { key: "omitted", label: "Omitted" },
   { key: "correct", label: "Correct" },
@@ -35,6 +47,10 @@ const modeOptions = [
   { key: "random", label: "Random Mix" },
 ];
 
+function normalizeMode(mode: string) {
+  return modeOptions.some((option) => option.key === mode) ? mode : "standard";
+}
+
 function defaultFilters(mode: string): Record<string, boolean> {
   if (mode === "due") return { due: true, overdue: true };
   if (mode === "wrong") return { incorrect: true };
@@ -46,6 +62,7 @@ function defaultFilters(mode: string): Record<string, boolean> {
 function cardMatchesStatus(card: StudyCardSummary, key: string) {
   if (key === "unused") return card.status === "unused";
   if (key === "incorrect") return card.status === "incorrect";
+  if (key === "difficult") return card.incorrectCount > 0;
   if (key === "marked") return card.isMarked;
   if (key === "omitted") return card.isOmitted;
   if (key === "correct") return card.status === "review" || card.status === "correct";
@@ -63,15 +80,22 @@ function cardMatchesMode(card: StudyCardSummary, mode: string) {
 
 export function StudySetupForm({
   initialMode,
+  activeSession,
   decks,
   cards,
 }: {
   initialMode: string;
+  activeSession?: ActiveStudySession | null;
   decks: DeckSummary[];
   cards: StudyCardSummary[];
 }) {
-  const [mode, setMode] = useState(initialMode);
-  const [filters, setFilters] = useState<Record<string, boolean>>(() => defaultFilters(initialMode));
+  const initialQuestionMode = normalizeMode(initialMode);
+  const [mode, setMode] = useState(initialQuestionMode);
+  const [endedSessionId, setEndedSessionId] = useState<string | null>(null);
+  const [showSetupOverride, setShowSetupOverride] = useState(false);
+  const [filters, setFilters] = useState<Record<string, boolean>>(() => (
+    initialMode === "difficult" ? { difficult: true } : defaultFilters(initialQuestionMode)
+  ));
   const [selectedDecks, setSelectedDecks] = useState<Record<string, boolean>>({});
   const [count, setCount] = useState(20);
   const [shuffle, setShuffle] = useState(true);
@@ -79,7 +103,9 @@ export function StudySetupForm({
   const [includeCorrect, setIncludeCorrect] = useState(false);
   const [direction, setDirection] = useState("front-back");
   const [error, setError] = useState("");
+  const [activeError, setActiveError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [ending, setEnding] = useState(false);
 
   const selectedFilterKeys = Object.entries(filters)
     .filter(([, value]) => value)
@@ -88,6 +114,8 @@ export function StudySetupForm({
   const selectedDeckIds = Object.entries(selectedDecks)
     .filter(([, value]) => value)
     .map(([id]) => id);
+  const visibleActiveSession = activeSession?.id === endedSessionId ? null : activeSession;
+  const showSetup = showSetupOverride || !visibleActiveSession;
 
   const matchingCards = useMemo(() => {
     return cards.filter((card) => {
@@ -111,10 +139,36 @@ export function StudySetupForm({
 
   const maxAllowed = matchingCards.length;
   const requestedCount = Math.min(Math.max(count, 0), maxAllowed);
+  const activeProgress = visibleActiveSession
+    ? Math.min(100, Math.round((visibleActiveSession.answeredCount / Math.max(visibleActiveSession.cardCount, 1)) * 100))
+    : 0;
 
   function chooseMode(nextMode: string) {
     setMode(nextMode);
     setFilters(defaultFilters(nextMode));
+  }
+
+  function showNewSessionSetup() {
+    setActiveError("");
+    setShowSetupOverride(true);
+  }
+
+  async function endActiveSession() {
+    if (!visibleActiveSession || ending) return;
+
+    setActiveError("");
+    setEnding(true);
+    const response = await fetch(`/api/study/${visibleActiveSession.id}/end`, { method: "POST" });
+    const body = await response.json().catch(() => null);
+    setEnding(false);
+
+    if (!response.ok) {
+      setActiveError(body?.error ?? "Could not end session.");
+      return;
+    }
+
+    setEndedSessionId(visibleActiveSession.id);
+    setShowSetupOverride(true);
   }
 
   async function startSession(event: React.FormEvent<HTMLFormElement>) {
@@ -149,7 +203,48 @@ export function StudySetupForm({
   }
 
   return (
-    <form onSubmit={startSession} className="panel overflow-hidden rounded-3xl bg-white/90">
+    <div className="space-y-4">
+      {visibleActiveSession ? (
+        <section className="panel overflow-hidden rounded-3xl bg-white/90">
+          <div className="grid gap-5 p-5 lg:grid-cols-[1fr_auto] lg:items-center">
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="text-sm font-semibold text-blue-600">Unfinished session</p>
+                <span className="badge">{visibleActiveSession.mode}</span>
+              </div>
+              <h2 className="mt-2 text-2xl font-semibold tracking-normal">Resume where you left off</h2>
+              <div className="mt-4 grid gap-2 text-sm text-slate-600 sm:grid-cols-4">
+                <span className="badge">{visibleActiveSession.answeredCount} / {visibleActiveSession.cardCount} answered</span>
+                <span className="badge">Correct: {visibleActiveSession.correctCount}</span>
+                <span className="badge">Wrong: {visibleActiveSession.wrongCount}</span>
+                <span className="badge">Started: {formatDate(visibleActiveSession.startedAt)}</span>
+              </div>
+              <div className="mt-4 h-2 overflow-hidden rounded-full bg-slate-100">
+                <div className="h-full rounded-full bg-blue-600 transition-all" style={{ width: `${activeProgress}%` }} />
+              </div>
+            </div>
+
+            <div className="flex flex-wrap gap-2 lg:justify-end">
+              <Link href={`/study/${visibleActiveSession.id}`} className="btn btn-primary">
+                <PlayCircle size={17} />
+                Resume
+              </Link>
+              <button type="button" className="btn" onClick={showNewSessionSetup}>
+                <ArrowRight size={17} />
+                Start new
+              </button>
+              <button type="button" className="btn btn-red" onClick={endActiveSession} disabled={ending}>
+                <X size={17} />
+                {ending ? "Ending..." : "End now"}
+              </button>
+            </div>
+          </div>
+          {activeError ? <p className="border-t border-red-100 bg-red-50 px-5 py-3 text-sm text-red-700">{activeError}</p> : null}
+        </section>
+      ) : null}
+
+      {showSetup ? (
+        <form onSubmit={startSession} className="panel overflow-hidden rounded-3xl bg-white/90">
       <section className="border-b border-slate-200 p-5">
         <div className="flex items-center gap-2">
           <h2 className="text-lg font-semibold">Question Mode</h2>
@@ -265,6 +360,8 @@ export function StudySetupForm({
           </button>
         </div>
       </section>
-    </form>
+        </form>
+      ) : null}
+    </div>
   );
 }

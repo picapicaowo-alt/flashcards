@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, ArrowRight, Check, Eye, EyeOff, Flag, RotateCcw, Star, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, CheckCircle2, Eye, EyeOff, Flag, RotateCcw, Star, X } from "lucide-react";
 import { MarkdownContent } from "@/components/MarkdownContent";
 import { formatDate } from "@/lib/dates";
 
@@ -27,6 +27,7 @@ type StudySession = {
   correctCount: number;
   wrongCount: number;
   omittedCount: number;
+  completedAt: string | null;
 };
 
 type Answer = "correct" | "wrong" | "omitted";
@@ -41,10 +42,15 @@ export function StudySessionPlayer({
   initialAnswers: Record<string, Answer>;
 }) {
   const [cards, setCards] = useState(initialCards);
-  const [index, setIndex] = useState(0);
+  const [index, setIndex] = useState(() => {
+    const firstUnansweredIndex = initialCards.findIndex((item) => !initialAnswers[item.id]);
+    return firstUnansweredIndex === -1 ? 0 : firstUnansweredIndex;
+  });
   const [revealed, setRevealed] = useState(false);
   const [answers, setAnswers] = useState<Record<string, Answer>>(initialAnswers);
   const [saving, setSaving] = useState(false);
+  const [ending, setEnding] = useState(false);
+  const [completed, setCompleted] = useState(() => Boolean(session.completedAt) || Object.keys(initialAnswers).length >= initialCards.length);
   const [error, setError] = useState("");
 
   const card = cards[index];
@@ -79,7 +85,37 @@ export function StudySessionPlayer({
     }
 
     setCards((current) => current.map((item) => (item.id === card.id ? { ...item, ...body.card } : item)));
-    setAnswers((current) => ({ ...current, [card.id]: result }));
+    setAnswers((current) => {
+      const nextAnswers = { ...current, [card.id]: result };
+      const isComplete = Boolean(body?.session?.completedAt) || Object.keys(nextAnswers).length >= cards.length;
+
+      if (isComplete) {
+        setCompleted(true);
+      } else {
+        const nextUnansweredIndex = cards.findIndex((item, itemIndex) => itemIndex > index && !nextAnswers[item.id]);
+        const firstUnansweredIndex = cards.findIndex((item) => !nextAnswers[item.id]);
+        setIndex(nextUnansweredIndex === -1 ? firstUnansweredIndex : nextUnansweredIndex);
+        setRevealed(false);
+      }
+
+      return nextAnswers;
+    });
+  }
+
+  async function endSession() {
+    if (ending) return;
+    setEnding(true);
+    setError("");
+    const response = await fetch(`/api/study/${session.id}/end`, { method: "POST" });
+    const body = await response.json().catch(() => null);
+    setEnding(false);
+
+    if (!response.ok) {
+      setError(body?.error ?? "Could not end session.");
+      return;
+    }
+
+    window.location.href = "/study";
   }
 
   async function patchFlag(patch: Record<string, unknown>) {
@@ -101,6 +137,7 @@ export function StudySessionPlayer({
     function handleKey(event: KeyboardEvent) {
       const target = event.target as HTMLElement | null;
       if (target?.tagName === "INPUT" || target?.tagName === "TEXTAREA") return;
+      if (completed) return;
 
       if (event.code === "Space") {
         event.preventDefault();
@@ -120,6 +157,40 @@ export function StudySessionPlayer({
 
   if (!card) return null;
 
+  if (completed) {
+    return (
+      <div className="min-h-[calc(100vh-8rem)]">
+        <section className="flex min-h-[70vh] items-center justify-center rounded-[2rem] border border-green-200 bg-[linear-gradient(90deg,#f0fdf4,#ffffff_48%,#dcfce7)] p-5">
+          <div className="w-full max-w-3xl rounded-[2rem] border border-green-200 bg-white p-7 text-center shadow-[0_24px_80px_rgba(22,163,74,0.12)] sm:p-12">
+            <div className="mx-auto grid size-16 place-items-center rounded-full bg-green-600 text-white">
+              <CheckCircle2 size={34} />
+            </div>
+            <p className="mt-6 text-sm font-semibold text-green-700">Study Session Complete</p>
+            <h1 className="mt-2 text-3xl font-semibold tracking-normal text-slate-950">
+              Congratulations, you have completed this study block.
+            </h1>
+            <div className="mt-6 grid gap-2 text-sm text-slate-600 sm:grid-cols-4">
+              <span className="badge justify-center">{answeredCount} / {cards.length} answered</span>
+              <span className="badge justify-center">Correct: {correctCount}</span>
+              <span className="badge justify-center">Wrong: {wrongCount}</span>
+              <span className="badge justify-center">Accuracy: {accuracy}</span>
+            </div>
+            <div className="mt-8 flex flex-wrap justify-center gap-3">
+              <button className="btn btn-green" onClick={() => window.location.assign("/study")}>
+                <Check size={17} />
+                Back to study setup
+              </button>
+              <button className="btn" onClick={() => setCompleted(false)}>
+                <RotateCcw size={17} />
+                Review answers
+              </button>
+            </div>
+          </div>
+        </section>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-[calc(100vh-8rem)]">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
@@ -127,12 +198,18 @@ export function StudySessionPlayer({
           <p className="text-sm font-semibold text-blue-600">Study Session</p>
           <h1 className="text-2xl font-semibold tracking-normal">{session.mode}</h1>
         </div>
-        <div className="flex flex-wrap gap-2 text-sm">
-          <span className="badge">Card {index + 1} / {cards.length}</span>
-          <span className="badge">Correct: {correctCount}</span>
-          <span className="badge">Wrong: {wrongCount}</span>
-          <span className="badge">Accuracy: {accuracy}</span>
-          <span className="badge">Answered: {answeredCount}</span>
+        <div className="flex flex-wrap items-center justify-end gap-2 text-sm">
+          <div className="flex flex-wrap gap-2">
+            <span className="badge">Card {index + 1} / {cards.length}</span>
+            <span className="badge">Correct: {correctCount}</span>
+            <span className="badge">Wrong: {wrongCount}</span>
+            <span className="badge">Accuracy: {accuracy}</span>
+            <span className="badge">Answered: {answeredCount}</span>
+          </div>
+          <button className="btn btn-red" onClick={endSession} disabled={ending}>
+            <X size={17} />
+            {ending ? "Ending..." : "End now"}
+          </button>
         </div>
       </div>
 

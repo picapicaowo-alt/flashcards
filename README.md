@@ -82,6 +82,12 @@ docker compose up -d --build
 
 The app container runs `prisma migrate deploy` before starting Next.js. PostgreSQL data is stored in the `postgres-data` Docker volume.
 
+For the AWS deployment at [http://44.237.189.188:3021](http://44.237.189.188:3021), use the production override:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.aws.yml up -d --build
+```
+
 ## Backups
 
 In the app, open Card Bank or Backup and choose Export JSON. To restore, open Backup and import the JSON file. Duplicate cards in the same deck are skipped.

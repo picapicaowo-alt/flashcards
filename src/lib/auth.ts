@@ -35,6 +35,13 @@ function timingSafeEqual(a: string, b: string) {
   return left.length === right.length && crypto.timingSafeEqual(left, right);
 }
 
+export function shouldUseSecureCookie(request: Request) {
+  const forwardedProto = request.headers.get("x-forwarded-proto")?.split(",")[0]?.trim().toLowerCase();
+  if (forwardedProto) return forwardedProto === "https";
+
+  return new URL(request.url).protocol === "https:";
+}
+
 export function createSessionToken(payload: Omit<SessionPayload, "exp">) {
   const session: SessionPayload = {
     ...payload,

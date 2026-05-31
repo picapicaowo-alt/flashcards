@@ -119,23 +119,47 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
     const logs = await tx.reviewLog.findMany({
       where: { sessionId },
-      select: { result: true },
+      orderBy: { createdAt: "asc" },
+      select: { cardId: true, result: true },
     });
-    const correctCount = logs.filter((log) => log.result === ReviewResult.correct).length;
-    const wrongCount = logs.filter((log) => log.result === ReviewResult.wrong).length;
-    const omittedCount = logs.filter((log) => log.result === ReviewResult.omitted).length;
+    const latestResults = new Map(logs.map((log) => [log.cardId, log.result]));
+    const results = Array.from(latestResults.values());
+    const answeredCount = latestResults.size;
+    const correctCount = results.filter((result) => result === ReviewResult.correct).length;
+    const wrongCount = results.filter((result) => result === ReviewResult.wrong).length;
+    const omittedCount = results.filter((result) => result === ReviewResult.omitted).length;
+    const playableCardCount = await tx.card.count({
+      where: { id: { in: session.cardIds } },
+    });
+    const completionTarget = Math.max(1, Math.min(session.cardCount, session.cardIds.length, playableCardCount));
 
-    await tx.studySession.update({
+    const updatedSession = await tx.studySession.update({
       where: { id: sessionId },
       data: {
         correctCount,
         wrongCount,
         omittedCount,
-        completedAt: logs.length >= session.cardCount ? now : null,
+        completedAt: answeredCount >= completionTarget ? (session.completedAt ?? now) : null,
+      },
+      select: {
+        id: true,
+        cardCount: true,
+        correctCount: true,
+        wrongCount: true,
+        omittedCount: true,
+        completedAt: true,
       },
     });
 
-    return { card: serializeCard(updatedCard), result };
+    return {
+      card: serializeCard(updatedCard),
+      result,
+      session: {
+        ...updatedSession,
+        answeredCount,
+        completedAt: updatedSession.completedAt?.toISOString() ?? null,
+      },
+    };
   });
 
   return NextResponse.json(saved);

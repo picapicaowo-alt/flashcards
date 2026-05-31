@@ -1,11 +1,12 @@
 import Link from "next/link";
-import { BookOpen, Database, Home, Import, LineChart, LogOut, PlayCircle } from "lucide-react";
+import { BookOpen, ClipboardList, Database, Home, Import, LineChart, LogOut, PlayCircle } from "lucide-react";
 
 const links = [
   { href: "/", label: "Dashboard", icon: Home },
   { href: "/import", label: "Import", icon: Import },
   { href: "/cards", label: "Card Bank", icon: Database },
   { href: "/study", label: "Study", icon: PlayCircle },
+  { href: "/study/history", label: "Past Tests", icon: ClipboardList },
   { href: "/stats", label: "Stats", icon: LineChart },
 ];
 

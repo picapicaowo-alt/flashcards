@@ -1,0 +1,7 @@
+services:
+  db:
+    ports: !override []
+
+  app:
+    ports: !override
+      - "3021:3000"
