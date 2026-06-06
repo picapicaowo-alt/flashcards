@@ -5,12 +5,7 @@ import { getPrisma } from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
 
-export default async function StudyPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ mode?: string }>;
-}) {
-  const params = await searchParams;
+export default async function StudyPage() {
   const prisma = getPrisma();
   const [decks, cards, activeSession] = await Promise.all([
     prisma.deck.findMany({ orderBy: { name: "asc" }, include: { _count: { select: { cards: true } } } }),
@@ -60,7 +55,6 @@ export default async function StudyPage({
         </Link>
       </div>
       <StudySetupForm
-        initialMode={params.mode ?? "standard"}
         activeSession={activeSession ? {
           id: activeSession.id,
           mode: activeSession.mode,

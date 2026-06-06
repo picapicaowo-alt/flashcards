@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, ArrowRight, Check, CheckCircle2, Eye, EyeOff, Flag, RotateCcw, Star, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, CheckCircle2, Eye, EyeOff, Flag, Pencil, RotateCcw, Star, X } from "lucide-react";
 import { MarkdownContent } from "@/components/MarkdownContent";
 import { formatDate } from "@/lib/dates";
 
@@ -49,9 +49,12 @@ export function StudySessionPlayer({
   const [revealed, setRevealed] = useState(false);
   const [answers, setAnswers] = useState<Record<string, Answer>>(initialAnswers);
   const [saving, setSaving] = useState(false);
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [editingCard, setEditingCard] = useState<StudyCard | null>(null);
   const [ending, setEnding] = useState(false);
   const [completed, setCompleted] = useState(() => Boolean(session.completedAt) || Object.keys(initialAnswers).length >= initialCards.length);
   const [error, setError] = useState("");
+  const [editError, setEditError] = useState("");
 
   const card = cards[index];
   const answeredCount = Object.keys(answers).length;
@@ -118,25 +121,60 @@ export function StudySessionPlayer({
     window.location.href = "/study";
   }
 
-  async function patchFlag(patch: Record<string, unknown>) {
-    if (!card) return;
-    const response = await fetch(`/api/cards/${card.id}`, {
+  async function patchCard(id: string, patch: Record<string, unknown>) {
+    const response = await fetch(`/api/cards/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(patch),
     });
     const body = await response.json().catch(() => null);
     if (!response.ok) {
-      setError(body?.error ?? "Could not update card.");
+      throw new Error(body?.error ?? "Could not update card.");
+    }
+    setCards((current) => current.map((item) => (item.id === id ? { ...item, ...body.card } : item)));
+    return body.card as Partial<StudyCard>;
+  }
+
+  async function patchFlag(patch: Record<string, unknown>) {
+    if (!card) return;
+    try {
+      setError("");
+      await patchCard(card.id, patch);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Could not update card.");
+    }
+  }
+
+  async function saveEdit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!editingCard || savingEdit) return;
+
+    const formData = new FormData(event.currentTarget);
+    const front = String(formData.get("front") ?? "").trim();
+    const back = String(formData.get("back") ?? "").trim();
+
+    if (!front || !back) {
+      setEditError("Front and back are required.");
       return;
     }
-    setCards((current) => current.map((item) => (item.id === card.id ? { ...item, ...body.card } : item)));
+
+    setSavingEdit(true);
+    setEditError("");
+    try {
+      await patchCard(editingCard.id, { front, back });
+      setEditingCard(null);
+    } catch (error) {
+      setEditError(error instanceof Error ? error.message : "Could not save card.");
+    } finally {
+      setSavingEdit(false);
+    }
   }
 
   useEffect(() => {
     function handleKey(event: KeyboardEvent) {
       const target = event.target as HTMLElement | null;
       if (target?.tagName === "INPUT" || target?.tagName === "TEXTAREA") return;
+      if (editingCard) return;
       if (completed) return;
 
       if (event.code === "Space") {
@@ -271,6 +309,13 @@ export function StudySessionPlayer({
         </div>
 
         <div className="mt-4 flex flex-wrap justify-center gap-2">
+          <button className="btn" onClick={() => {
+            setEditError("");
+            setEditingCard(card);
+          }}>
+            <Pencil size={17} />
+            Edit
+          </button>
           <button className="btn" onClick={() => patchFlag({ isMarked: !card.isMarked })}>
             <Star size={17} />
             {card.isMarked ? "Unmark" : "Mark"}
@@ -285,6 +330,43 @@ export function StudySessionPlayer({
           </button>
         </div>
       </section>
+
+      {editingCard ? (
+        <div className="fixed inset-0 z-40 grid place-items-center bg-slate-950/30 p-4 backdrop-blur-sm">
+          <form onSubmit={saveEdit} className="panel w-full max-w-3xl rounded-3xl bg-white p-5">
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-semibold text-blue-600">{editingCard.deckName}</p>
+                <h2 className="text-xl font-semibold">Edit card</h2>
+              </div>
+              <button type="button" className="btn min-h-9 px-3" onClick={() => setEditingCard(null)} disabled={savingEdit}>
+                <X size={16} />
+              </button>
+            </div>
+
+            <label className="block">
+              <span className="mb-1 block text-sm font-medium text-slate-600">Front</span>
+              <input className="field" name="front" defaultValue={editingCard.front} disabled={savingEdit} />
+            </label>
+            <label className="mt-4 block">
+              <span className="mb-1 block text-sm font-medium text-slate-600">Back</span>
+              <textarea className="field min-h-64 font-mono text-sm leading-6" name="back" defaultValue={editingCard.back} disabled={savingEdit} />
+            </label>
+
+            {editError ? <p className="mt-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{editError}</p> : null}
+
+            <div className="mt-5 flex justify-end gap-2">
+              <button type="button" className="btn" onClick={() => setEditingCard(null)} disabled={savingEdit}>
+                Cancel
+              </button>
+              <button className="btn btn-primary" disabled={savingEdit}>
+                <Check size={16} />
+                {savingEdit ? "Saving..." : "Save"}
+              </button>
+            </div>
+          </form>
+        </div>
+      ) : null}
 
       {error ? <p className="mt-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
     </div>

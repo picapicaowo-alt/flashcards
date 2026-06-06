@@ -25,33 +25,27 @@ function matchesStatus(card: {
   return false;
 }
 
-function matchesMode(card: {
-  status: CardStatus;
-  isMarked: boolean;
-  nextReviewAt: Date | null;
-}, mode: string) {
-  if (mode === "due") return Boolean(card.nextReviewAt) && card.nextReviewAt! <= endOfToday();
-  if (mode === "wrong") return card.status === CardStatus.incorrect;
-  if (mode === "marked") return card.isMarked;
-  return true;
-}
-
 export async function POST(request: Request) {
   const auth = await requireApiUser();
   if (auth.response) return auth.response;
 
   const body = await request.json().catch(() => null);
-  const mode = String(body?.mode ?? "standard");
+  const mode = "standard";
   const deckIds = Array.isArray(body?.deckIds) ? body.deckIds.map(String) : [];
   const filters = typeof body?.filters === "object" && body.filters ? body.filters : {};
   const filterKeys = Object.entries(filters)
     .filter(([, value]) => Boolean(value))
     .map(([key]) => key);
+  const allCategorySelected = filterKeys.includes("all");
+  const statusKeys = filterKeys.filter((key) => key !== "all");
   const limit = Math.max(0, Math.min(Number(body?.count ?? 20), 300));
-  const includeOmitted = Boolean(body?.includeOmitted) || Boolean(filters.omitted);
+  const includeOmitted = allCategorySelected || Boolean(body?.includeOmitted) || Boolean(filters.omitted);
   const includeCorrect = Boolean(body?.includeCorrect);
+  const effectiveStatusKeys = includeCorrect && !statusKeys.includes("correct")
+    ? [...statusKeys, "correct"]
+    : statusKeys;
   const shouldShuffle = body?.shuffle !== false;
-  const prioritizesDifficulty = filterKeys.includes("difficult");
+  const prioritizesDifficulty = !allCategorySelected && effectiveStatusKeys.includes("difficult");
 
   const prisma = getPrisma();
   const cards = await prisma.card.findMany({
@@ -64,17 +58,10 @@ export async function POST(request: Request) {
   });
 
   const selected = cards.filter((card) => {
-    if (!includeOmitted && !card.isOmitted) {
-      // keep going
-    } else if (!includeOmitted && card.isOmitted) {
-      return false;
-    }
-    if (!includeCorrect && filterKeys.length === 0 && mode !== "due" && mode !== "marked" && card.status !== CardStatus.unused && card.status !== CardStatus.incorrect && card.status !== CardStatus.learning) {
-      return false;
-    }
-    if (!matchesMode(card, mode)) return false;
-    if (filterKeys.length > 0 && !filterKeys.some((key) => matchesStatus(card, key))) return false;
-    return true;
+    if (allCategorySelected) return true;
+    if (!includeOmitted && card.isOmitted) return false;
+    if (effectiveStatusKeys.length === 0) return false;
+    return effectiveStatusKeys.some((key) => matchesStatus(card, key));
   });
 
   const limitedCards = prioritizesDifficulty ? selected.slice(0, limit) : selected;

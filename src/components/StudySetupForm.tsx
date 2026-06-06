@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { ArrowRight, CheckCircle2, Info, PlayCircle, Shuffle, X } from "lucide-react";
+import { ArrowRight, CheckCircle2, PlayCircle, Shuffle, X } from "lucide-react";
 import { formatDate, isDueToday, isOverdue } from "@/lib/dates";
 
 type DeckSummary = { id: string; name: string; total: number };
@@ -28,7 +28,8 @@ type StudyCardSummary = {
   createdAt: string;
 };
 
-const statusOptions = [
+const categoryOptions = [
+  { key: "all", label: "All" },
   { key: "unused", label: "Unused" },
   { key: "incorrect", label: "Incorrect" },
   { key: "difficult", label: "Most difficult" },
@@ -39,27 +40,10 @@ const statusOptions = [
   { key: "overdue", label: "Overdue" },
 ];
 
-const modeOptions = [
-  { key: "standard", label: "Standard Review" },
-  { key: "due", label: "Due Cards Only" },
-  { key: "wrong", label: "Wrong Bank" },
-  { key: "marked", label: "Marked Cards" },
-  { key: "random", label: "Random Mix" },
-];
-
-function normalizeMode(mode: string) {
-  return modeOptions.some((option) => option.key === mode) ? mode : "standard";
-}
-
-function defaultFilters(mode: string): Record<string, boolean> {
-  if (mode === "due") return { due: true, overdue: true };
-  if (mode === "wrong") return { incorrect: true };
-  if (mode === "marked") return { marked: true };
-  if (mode === "random") return {};
-  return { unused: true, incorrect: true };
-}
+const defaultFilters: Record<string, boolean> = { unused: true, incorrect: true };
 
 function cardMatchesStatus(card: StudyCardSummary, key: string) {
+  if (key === "all") return true;
   if (key === "unused") return card.status === "unused";
   if (key === "incorrect") return card.status === "incorrect";
   if (key === "difficult") return card.incorrectCount > 0;
@@ -71,32 +55,21 @@ function cardMatchesStatus(card: StudyCardSummary, key: string) {
   return false;
 }
 
-function cardMatchesMode(card: StudyCardSummary, mode: string) {
-  if (mode === "due") return Boolean(card.nextReviewAt) && (isDueToday(card.nextReviewAt) || isOverdue(card.nextReviewAt));
-  if (mode === "wrong") return card.status === "incorrect";
-  if (mode === "marked") return card.isMarked;
-  return true;
-}
-
 export function StudySetupForm({
-  initialMode,
   activeSession,
   decks,
   cards,
 }: {
-  initialMode: string;
   activeSession?: ActiveStudySession | null;
   decks: DeckSummary[];
   cards: StudyCardSummary[];
 }) {
-  const initialQuestionMode = normalizeMode(initialMode);
-  const [mode, setMode] = useState(initialQuestionMode);
   const [endedSessionId, setEndedSessionId] = useState<string | null>(null);
   const [showSetupOverride, setShowSetupOverride] = useState(false);
-  const [filters, setFilters] = useState<Record<string, boolean>>(() => (
-    initialMode === "difficult" ? { difficult: true } : defaultFilters(initialQuestionMode)
+  const [filters, setFilters] = useState<Record<string, boolean>>(() => defaultFilters);
+  const [selectedDecks, setSelectedDecks] = useState<Record<string, boolean>>(() => (
+    Object.fromEntries(decks.map((deck) => [deck.id, true]))
   ));
-  const [selectedDecks, setSelectedDecks] = useState<Record<string, boolean>>({});
   const [count, setCount] = useState(20);
   const [shuffle, setShuffle] = useState(true);
   const [includeOmitted, setIncludeOmitted] = useState(false);
@@ -107,35 +80,50 @@ export function StudySetupForm({
   const [loading, setLoading] = useState(false);
   const [ending, setEnding] = useState(false);
 
-  const selectedFilterKeys = Object.entries(filters)
-    .filter(([, value]) => value)
-    .map(([key]) => key);
+  const selectedCategoryKeys = useMemo(() => (
+    Object.entries(filters)
+      .filter(([, value]) => value)
+      .map(([key]) => key)
+  ), [filters]);
+  const allCategorySelected = Boolean(filters.all);
+  const selectedStatusKeys = useMemo(() => (
+    selectedCategoryKeys.filter((key) => key !== "all")
+  ), [selectedCategoryKeys]);
+  const effectiveStatusKeys = useMemo(() => (
+    includeCorrect && !selectedStatusKeys.includes("correct")
+      ? [...selectedStatusKeys, "correct"]
+      : selectedStatusKeys
+  ), [includeCorrect, selectedStatusKeys]);
 
-  const selectedDeckIds = Object.entries(selectedDecks)
-    .filter(([, value]) => value)
-    .map(([id]) => id);
+  const selectedDeckIds = useMemo(() => (
+    Object.entries(selectedDecks)
+      .filter(([, value]) => value)
+      .map(([id]) => id)
+  ), [selectedDecks]);
+  const allDecksSelected = selectedDeckIds.length === decks.length && decks.length > 0;
   const visibleActiveSession = activeSession?.id === endedSessionId ? null : activeSession;
   const showSetup = showSetupOverride || !visibleActiveSession;
 
-  const matchingCards = useMemo(() => {
+  const categoryMatchingCards = useMemo(() => {
     return cards.filter((card) => {
+      if (allCategorySelected) return true;
       if (!includeOmitted && !filters.omitted && card.isOmitted) return false;
-      if (!includeCorrect && card.status !== "unused" && card.status !== "incorrect" && card.status !== "learning" && selectedFilterKeys.length === 0 && mode !== "due" && mode !== "marked") {
-        return false;
-      }
-      if (selectedDeckIds.length > 0 && !selectedDeckIds.includes(card.deckId)) return false;
-      if (!cardMatchesMode(card, mode)) return false;
-      if (selectedFilterKeys.length > 0 && !selectedFilterKeys.some((key) => cardMatchesStatus(card, key))) return false;
-      return true;
+      if (effectiveStatusKeys.length === 0) return false;
+      return effectiveStatusKeys.some((key) => cardMatchesStatus(card, key));
     });
-  }, [cards, filters.omitted, includeCorrect, includeOmitted, mode, selectedDeckIds, selectedFilterKeys]);
+  }, [allCategorySelected, cards, effectiveStatusKeys, filters.omitted, includeOmitted]);
+
+  const matchingCards = useMemo(() => {
+    if (selectedDeckIds.length === 0) return [];
+    return categoryMatchingCards.filter((card) => selectedDeckIds.includes(card.deckId));
+  }, [categoryMatchingCards, selectedDeckIds]);
 
   const deckCounts = useMemo(() => {
     return decks.map((deck) => ({
       ...deck,
-      matching: matchingCards.filter((card) => card.deckId === deck.id).length,
+      matching: categoryMatchingCards.filter((card) => card.deckId === deck.id).length,
     }));
-  }, [decks, matchingCards]);
+  }, [categoryMatchingCards, decks]);
 
   const maxAllowed = matchingCards.length;
   const requestedCount = Math.min(Math.max(count, 0), maxAllowed);
@@ -143,9 +131,13 @@ export function StudySetupForm({
     ? Math.min(100, Math.round((visibleActiveSession.answeredCount / Math.max(visibleActiveSession.cardCount, 1)) * 100))
     : 0;
 
-  function chooseMode(nextMode: string) {
-    setMode(nextMode);
-    setFilters(defaultFilters(nextMode));
+  function toggleCategory(key: string, checked: boolean) {
+    if (key === "all") {
+      setFilters(checked ? { all: true } : {});
+      return;
+    }
+
+    setFilters((current) => ({ ...current, all: false, [key]: checked }));
   }
 
   function showNewSessionSetup() {
@@ -180,9 +172,9 @@ export function StudySetupForm({
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        mode,
+        mode: "standard",
         filters,
-        deckIds: selectedDeckIds,
+        deckIds: allDecksSelected ? [] : selectedDeckIds,
         count: requestedCount,
         shuffle,
         includeOmitted,
@@ -246,34 +238,21 @@ export function StudySetupForm({
       {showSetup ? (
         <form onSubmit={startSession} className="panel overflow-hidden rounded-3xl bg-white/90">
       <section className="border-b border-slate-200 p-5">
-        <div className="flex items-center gap-2">
-          <h2 className="text-lg font-semibold">Question Mode</h2>
-          <Info size={16} className="text-blue-500" />
-        </div>
-        <div className="mt-4 inline-flex flex-wrap rounded-full bg-slate-100 p-1">
-          {modeOptions.map((option) => (
-            <button
-              type="button"
-              key={option.key}
-              onClick={() => chooseMode(option.key)}
-              className={`min-h-9 rounded-full px-4 text-sm font-medium transition ${mode === option.key ? "bg-white text-slate-950 shadow-sm" : "text-slate-500 hover:text-slate-800"}`}
-            >
-              {option.label}
-            </button>
-          ))}
-        </div>
+        <h2 className="text-lg font-semibold">Category</h2>
 
-        <div className="mt-7 flex flex-wrap gap-x-10 gap-y-4">
-          {statusOptions.map((option) => (
+        <div className="mt-5 flex flex-wrap gap-x-10 gap-y-4">
+          {categoryOptions.map((option) => (
             <label key={option.key} className="inline-flex items-center gap-2 text-base font-medium text-slate-700">
               <input
                 type="checkbox"
                 className="size-5 accent-blue-600"
                 checked={Boolean(filters[option.key])}
-                onChange={(event) => setFilters((current) => ({ ...current, [option.key]: event.target.checked }))}
+                onChange={(event) => toggleCategory(option.key, event.target.checked)}
               />
               {option.label}
-              <span className="badge">{cards.filter((card) => cardMatchesStatus(card, option.key)).length}</span>
+              <span className="badge">
+                {option.key === "all" ? cards.length : cards.filter((card) => cardMatchesStatus(card, option.key)).length}
+              </span>
             </label>
           ))}
         </div>
@@ -284,7 +263,7 @@ export function StudySetupForm({
           <input
             type="checkbox"
             className="size-5 accent-blue-600"
-            checked={selectedDeckIds.length === decks.length && decks.length > 0}
+            checked={allDecksSelected}
             onChange={(event) => {
               const checked = event.target.checked;
               setSelectedDecks(Object.fromEntries(decks.map((deck) => [deck.id, checked])));
@@ -303,7 +282,7 @@ export function StudySetupForm({
                 onChange={(event) => setSelectedDecks((current) => ({ ...current, [deck.id]: event.target.checked }))}
               />
               <span>{deck.name}</span>
-              <span className="badge">{deck.matching}</span>
+              <span className="badge">{deck.matching}/{deck.total}</span>
             </label>
           ))}
           {decks.length === 0 ? <p className="text-sm text-slate-500">Import a lesson before starting a session.</p> : null}

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { CardStatus } from "@prisma/client";
-import { ArrowRight, Database, FileInput, PlayCircle, RotateCcw, Star } from "lucide-react";
+import { ClipboardList, Database, FileInput, PlayCircle, Star } from "lucide-react";
 import { StatCard } from "@/components/StatCard";
 import { endOfToday, startOfToday } from "@/lib/dates";
 import { getPrisma } from "@/lib/prisma";
@@ -45,11 +45,10 @@ export default async function DashboardPage() {
   const wrong = reviewTotals._sum.incorrectCount ?? 0;
 
   const actions = [
-    { href: "/study?mode=due", label: "Review Due Cards", icon: RotateCcw },
-    { href: "/study?mode=wrong", label: "Study Wrong Bank", icon: PlayCircle },
-    { href: "/study?mode=random", label: "Random 20 Cards", icon: ArrowRight },
+    { href: "/study", label: "Build Study Block", icon: PlayCircle },
     { href: "/cards", label: "Open Card Bank", icon: Database },
     { href: "/stats", label: "View Stats", icon: Star },
+    { href: "/study/history", label: "Past Tests", icon: ClipboardList },
   ];
 
   return (

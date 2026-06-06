@@ -6,8 +6,10 @@ type ReviewLogSummary = {
 };
 
 const filterLabels: Record<string, string> = {
+  all: "All",
   unused: "Unused",
   incorrect: "Incorrect",
+  difficult: "Most difficult",
   marked: "Marked",
   omitted: "Omitted",
   correct: "Correct",
