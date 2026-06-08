@@ -1,8 +1,15 @@
 import { ImportLessonForm } from "@/components/ImportLessonForm";
+import { getPrisma } from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
 
-export default function ImportPage() {
+export default async function ImportPage() {
+  const prisma = getPrisma();
+  const decks = await prisma.deck.findMany({
+    orderBy: { name: "asc" },
+    select: { id: true, name: true },
+  });
+
   return (
     <div className="space-y-6">
       <div>
@@ -13,7 +20,7 @@ export default function ImportPage() {
           romanization, examples, and notes intact.
         </p>
       </div>
-      <ImportLessonForm />
+      <ImportLessonForm decks={decks} />
     </div>
   );
 }

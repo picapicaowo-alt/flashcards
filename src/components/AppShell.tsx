@@ -4,6 +4,7 @@ import { BookOpen, ClipboardList, Database, Home, Import, LineChart, LogOut, Pla
 const links = [
   { href: "/", label: "Dashboard", icon: Home },
   { href: "/import", label: "Import", icon: Import },
+  { href: "/decks", label: "Decks", icon: BookOpen },
   { href: "/cards", label: "Card Bank", icon: Database },
   { href: "/study", label: "Study", icon: PlayCircle },
   { href: "/study/history", label: "Past Tests", icon: ClipboardList },

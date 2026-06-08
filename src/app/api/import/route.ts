@@ -15,12 +15,13 @@ export async function POST(request: Request) {
   if (auth.response) return auth.response;
 
   const body = await request.json().catch(() => null);
+  const deckId = String(body?.deckId ?? "").trim();
   const deckName = String(body?.deckName ?? "").trim();
   const markdown = String(body?.markdown ?? "");
   const lessonDateValue = String(body?.lessonDate ?? "");
   const parsed = parseMarkdownTable(markdown);
 
-  if (!deckName) {
+  if (!deckId && !deckName) {
     return NextResponse.json({ error: "Deck name is required." }, { status: 400 });
   }
 
@@ -31,13 +32,20 @@ export async function POST(request: Request) {
   const prisma = getPrisma();
   const tagNames = parseTags(body?.tags);
   const lessonDate = lessonDateValue ? new Date(`${lessonDateValue}T00:00:00`) : null;
+  const existingDeck = deckId ? await prisma.deck.findUnique({ where: { id: deckId } }) : null;
+
+  if (deckId && !existingDeck) {
+    return NextResponse.json({ error: "Selected deck was not found." }, { status: 404 });
+  }
 
   const result = await prisma.$transaction(async (tx) => {
-    const deck = await tx.deck.upsert({
-      where: { name: deckName },
-      update: { lessonDate: lessonDate ?? undefined },
-      create: { name: deckName, lessonDate },
-    });
+    const deck =
+      existingDeck ??
+      (await tx.deck.upsert({
+        where: { name: deckName },
+        update: { lessonDate: lessonDate ?? undefined },
+        create: { name: deckName, lessonDate },
+      }));
 
     const tags = await Promise.all(
       tagNames.map((name) =>
@@ -81,7 +89,7 @@ export async function POST(request: Request) {
       imported += 1;
     }
 
-    return { imported, skipped, deckId: deck.id };
+    return { imported, skipped, deckId: deck.id, deckName: deck.name };
   });
 
   return NextResponse.json(result);
