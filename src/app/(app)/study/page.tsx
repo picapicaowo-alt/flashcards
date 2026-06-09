@@ -65,7 +65,12 @@ export default async function StudyPage() {
           omittedCount: activeSession.omittedCount,
           startedAt: activeSession.startedAt.toISOString(),
         } : null}
-        decks={decks.map((deck) => ({ id: deck.id, name: deck.name, total: deck._count.cards }))}
+        decks={decks.map((deck) => ({
+          id: deck.id,
+          name: deck.name,
+          total: deck._count.cards,
+          createdAt: deck.createdAt.toISOString(),
+        }))}
         cards={cards.map((card) => ({
           ...card,
           nextReviewAt: card.nextReviewAt?.toISOString() ?? null,

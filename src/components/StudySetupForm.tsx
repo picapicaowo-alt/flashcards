@@ -2,10 +2,11 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { ArrowRight, CheckCircle2, PlayCircle, Shuffle, X } from "lucide-react";
+import { ArrowRight, CheckCircle2, PlayCircle, Search, Shuffle, X } from "lucide-react";
 import { formatDate, isDueToday, isOverdue } from "@/lib/dates";
 
-type DeckSummary = { id: string; name: string; total: number };
+type DeckSummary = { id: string; name: string; total: number; createdAt: string };
+type DeckSort = "name" | "newest" | "oldest";
 type ActiveStudySession = {
   id: string;
   mode: string;
@@ -41,6 +42,7 @@ const categoryOptions = [
 ];
 
 const defaultFilters: Record<string, boolean> = { unused: true, incorrect: true };
+const deckNameCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
 
 function cardMatchesStatus(card: StudyCardSummary, key: string) {
   if (key === "all") return true;
@@ -75,6 +77,8 @@ export function StudySetupForm({
   const [includeOmitted, setIncludeOmitted] = useState(false);
   const [includeCorrect, setIncludeCorrect] = useState(false);
   const [direction, setDirection] = useState("front-back");
+  const [deckQuery, setDeckQuery] = useState("");
+  const [deckSort, setDeckSort] = useState<DeckSort>("name");
   const [error, setError] = useState("");
   const [activeError, setActiveError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -118,12 +122,35 @@ export function StudySetupForm({
     return categoryMatchingCards.filter((card) => selectedDeckIds.includes(card.deckId));
   }, [categoryMatchingCards, selectedDeckIds]);
 
+  const matchingCountByDeck = useMemo(() => {
+    const counts = new Map<string, number>();
+    categoryMatchingCards.forEach((card) => {
+      counts.set(card.deckId, (counts.get(card.deckId) ?? 0) + 1);
+    });
+    return counts;
+  }, [categoryMatchingCards]);
+
   const deckCounts = useMemo(() => {
     return decks.map((deck) => ({
       ...deck,
-      matching: categoryMatchingCards.filter((card) => card.deckId === deck.id).length,
+      matching: matchingCountByDeck.get(deck.id) ?? 0,
     }));
-  }, [categoryMatchingCards, decks]);
+  }, [decks, matchingCountByDeck]);
+
+  const visibleDeckCounts = useMemo(() => {
+    const needle = deckQuery.trim().toLowerCase();
+    return [...deckCounts]
+      .filter((deck) => (needle ? deck.name.toLowerCase().includes(needle) : true))
+      .sort((first, second) => {
+        const nameOrder = deckNameCollator.compare(first.name, second.name);
+        if (deckSort === "name") return nameOrder;
+        const timeOrder = first.createdAt.localeCompare(second.createdAt);
+        return deckSort === "newest" ? timeOrder * -1 || nameOrder : timeOrder || nameOrder;
+      });
+  }, [deckCounts, deckQuery, deckSort]);
+
+  const visibleDeckIds = useMemo(() => visibleDeckCounts.map((deck) => deck.id), [visibleDeckCounts]);
+  const allVisibleDecksSelected = visibleDeckIds.length > 0 && visibleDeckIds.every((id) => selectedDecks[id]);
 
   const maxAllowed = matchingCards.length;
   const requestedCount = Math.min(Math.max(count, 0), maxAllowed);
@@ -259,21 +286,48 @@ export function StudySetupForm({
       </section>
 
       <section className="border-b border-slate-200 p-5">
-        <label className="inline-flex items-center gap-2 text-lg font-semibold">
-          <input
-            type="checkbox"
-            className="size-5 accent-blue-600"
-            checked={allDecksSelected}
-            onChange={(event) => {
-              const checked = event.target.checked;
-              setSelectedDecks(Object.fromEntries(decks.map((deck) => [deck.id, checked])));
-            }}
-          />
-          Subjects and Chapters
-        </label>
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <label className="inline-flex items-center gap-2 text-lg font-semibold">
+            <input
+              type="checkbox"
+              className="size-5 accent-blue-600"
+              checked={allVisibleDecksSelected}
+              disabled={visibleDeckIds.length === 0}
+              onChange={(event) => {
+                const checked = event.target.checked;
+                setSelectedDecks((current) => {
+                  const next = { ...current };
+                  visibleDeckIds.forEach((id) => {
+                    next[id] = checked;
+                  });
+                  return next;
+                });
+              }}
+            />
+            Subjects and Chapters
+            <span className="badge">{visibleDeckCounts.length}/{decks.length}</span>
+          </label>
+
+          <div className="grid gap-3 sm:grid-cols-[minmax(0,18rem)_12rem]">
+            <label className="relative">
+              <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+              <input
+                className="field pl-10"
+                value={deckQuery}
+                onChange={(event) => setDeckQuery(event.target.value)}
+                placeholder="Search subjects or chapters"
+              />
+            </label>
+            <select className="field" value={deckSort} onChange={(event) => setDeckSort(event.target.value as DeckSort)} aria-label="Sort subjects and chapters">
+              <option value="name">Name A-Z</option>
+              <option value="newest">Added newest</option>
+              <option value="oldest">Added oldest</option>
+            </select>
+          </div>
+        </div>
 
         <div className="mt-6 grid gap-x-16 gap-y-3 sm:grid-cols-2">
-          {deckCounts.map((deck) => (
+          {visibleDeckCounts.map((deck) => (
             <label key={deck.id} className="inline-flex items-center gap-2 text-base text-slate-700">
               <input
                 type="checkbox"
@@ -286,6 +340,7 @@ export function StudySetupForm({
             </label>
           ))}
           {decks.length === 0 ? <p className="text-sm text-slate-500">Import a lesson before starting a session.</p> : null}
+          {decks.length > 0 && visibleDeckCounts.length === 0 ? <p className="text-sm text-slate-500">No matching subjects or chapters.</p> : null}
         </div>
       </section>
 
